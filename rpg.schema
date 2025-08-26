@@ -1,0 +1,300 @@
+struct AbilityEffect{
+	string: name: required: description("The name of the ability effect");
+	string: description: required: description("The description of the ability effect");
+	int8: bonus: required: description("The bonus provided by the ability effect, ranging from 1 to 100, where 1 is the weakest and 100 is the strongest.");
+	int8: duration: required: description("The duration of the ability effect in seconds, ranging from 1 to 3600, where 1 is the shortest and 3600 is the longest.");
+	bool: isPassive: required: description("Whether or not the ability effect is passive. If true, the effect is always active and does not require activation.");
+	bool: isActive: required: description("Whether or not the ability effect is active. If true, the effect requires activation to be used.");
+}
+
+struct Ability{
+	string: name: required: description("The name of the ability");
+	string: description: required: description("The description of the ability");
+	int8: level: required: description("The level of the ability, ranging from 1 to 20, where 1 is the weakest and 20 is the strongest.");
+	string: type: required: description("The type of the ability, such as 'Physical', 'Magical', 'Psychic', etc.");
+	array<AbilityEffect>: effects: required: description("The effects of the ability, which can include multiple effects that modify the ability's behavior or impact."): unique: min_items(1);
+}
+
+struct Currency{
+	string: name: required: description("The name of the currency");
+	string: symbol: required: description("The symbol of the currency");
+	float: exchangeRate: required: description("The exchange rate of the currency against the base currency, which is has an exchange rate of 1.0. For example, if the base currency is gold and the exchange rate is 0.5, then 1 gold is worth 2 of this currency.");
+}
+
+enum EquipSlot {
+	Head,
+	Chest,
+	Legs,
+	Feet,
+	Hands,
+	Weapon,
+	Ring,
+	Necklace
+}
+
+struct Character{
+	string: first_name: required: description("The first name of the character");
+	string: middle_name: optional: description("The middle name of the character");
+	string: last_name: required: description("The last name of the character");
+	int8: age: required: description("The age of the character");
+	string: biography: required: description("A biography of the character, which provides detailed information about the character's background, personality, and notable achievements.");
+	string: physical_description: required: description("A description of the character's physical appearance, including their height, weight, hair color, eye color, and any distinguishing features.");
+	bool: strip_asterisk: required: description("Whether or not the character is a strip asterisk. If true, the character is a strip asterisk and can be used for strip asterisk activities. If false, the character is not a strip asterisk and cannot be used for strip asterisk activities.");
+	bool: strip_quote: required: description("Whether or not the character is a strip quote. If true, the character is a strip quote and can be used for strip quote activities. If false, the character is not a strip quote and cannot be used for strip quote activities.");
+	int64: current_location_id: required: reference(Location.id): description("The current location of the character.");
+	int64: party_id: optional: reference(Party.id): description("The party that the character is associated with, which is a party that represents the character's membership and participation.");
+}
+
+struct Religion{
+	string: name: required: description("The name of the religion");
+	array<int64>: god_ids: required: reference(Character.id): description("The gods worshipped by this religion");
+}
+
+struct Species{
+	string: name: required: description("The name of the species");
+	string: culturalDescription: required: description("A description of the species' culture, including their customs, traditions, and way of life.");
+	string: physicalDescription: required: description("A description of the species' physical characteristics, including their appearance, anatomy, and any unique traits.");
+	array<Ability>: abilities: required: description("The abilities of the species, which are abilities that represent the species' skills, powers, and special features."): unique: min_items(1);
+}
+
+struct Guild{
+	string: name: required: description("The name of the guild");
+	string: description: required: description("A description of the guild, including its purpose, goals");
+	int64: leader_id: required: reference(Character.id): description("The leader of the guild, who is a character that represents the guild's leadership and authority.");
+	array<int64>: member_ids: optional: reference(Character.id): description("The members of the guild, who are characters that represent the guild's membership and participation.");
+	int64: headquarters_id: required: reference(Location.id): description("The headquarters of the guild, which is a location that serves as the central hub for the guild's activities and operations.");
+}
+
+struct Party{
+	string: name: required: description("The name of the party");
+	string: description: required: description("A description of the party, including its purpose, goals, and activities.");
+	int64: guild_id: required: reference(Guild.id): description("The guild that the party is associated with, which is a guild that represents the party's membership and participation.");
+	int64: government_id: required: reference(Government.id): description("The government that the party is associated with, which is a government that represents the party's political affiliation and influence.");
+	int64: religion_id: required: reference(Religion.id): description("The religion that the party is associated with, which is a religion that represents the party's beliefs and values.");
+	int64: church_id: required: reference(Church.id): description("The church that the party is associated with, which is a church that represents the party's religious affiliation and activities.");
+	array<int64>: member_ids: required: reference(Character.id): description("The members of the party, who are characters that represent the party's membership and participation.");
+}
+
+struct Faction{
+	string: name: required: description("The name of the faction");
+	string: description: required: description("A description of the faction, including its purpose, goals, and activities.");
+	int64: leader_id: required: reference(Character.id): description("The leader of the faction, who is a character that represents the faction's leadership and authority.");
+	int64: headquarters_id: required: reference(Location.id): description("The headquarters of the faction, which is a location that serves as the central hub for the faction's activities and operations.");
+	array<int64>: member_ids: required: reference(Character.id): description("The members of the faction, who are characters that represent the faction's membership and participation.");
+	int64: guild_id: optional: reference(Guild.id): description("The guild that the faction is associated with, which is a guild that represents the faction's membership and participation. If the faction does not have a specific guild, this field can be null.");
+	int64: government_id: optional: reference(Government.id): description("The government that the faction is associated with, which is a government that represents the faction's political affiliation and influence. If the faction does not have a specific government, this field can be null.");
+	int64: religion_id: optional: reference(Religion.id): description("The religion that the faction is associated with, which is a religion that represents the faction's beliefs and values. If the faction does not have a specific religion, this field can be null.");
+	int64: church_id: optional: reference(Church.id): description("The church that the faction is associated with, which is a church that represents the faction's religious affiliation and activities. If the faction does not have a specific church, this field can be null.");
+}
+
+struct Quest{
+	int64: postedByFaction_id: optional: reference(Faction.id): description("The faction that posted the quest, which is a faction that represents the quest's origin and authority.");
+	int64: postedByCharacter_id: optional: reference(Character.id): description("The character that posted the quest, which is a character that represents the quest's origin and authority.");
+	int64: postedByChurch_id: optional: reference(Church.id): description("The church that posted the quest, which is a church that represents the quest's origin and authority.");
+	int64: postedByGovernment_id: optional: reference(Government.id): description("The government that posted the quest, which is a government that represents the quest's origin and authority.");	
+	int64: postedByParty_id: optional: reference(Party.id): description("The party that posted the quest, which is a party that represents the quest's origin and authority.");
+	int64: assignedParty_id: optional: reference(Party.id): description("The party that is assigned to the quest, which is a party that represents the quest's assignment and responsibility.");
+	int64: assignedCharacter_id: optional: reference(Character.id): description("The character that is assigned to the quest, which is a character that represents the quest's assignment and responsibility.");
+	bool: inProgress: required: description("Whether or not the quest is in progress. If true, the quest is currently being worked on by the assigned party or character. If false, the quest is not in progress and can be assigned to a new party or character.");
+	string: title: required: description("The title of the quest, which is a short and descriptive name that summarizes the quest's objective and purpose.");
+	string: description: required: description("A description of the quest, which provides detailed information about the quest's objective, challenges, and requirements.");
+}
+
+struct Realm{
+	
+}
+
+struct World{
+	string: name: required: description("The name of the world");
+	string: description: required: description("A description of the world, including its geography, culture, and notable features.");
+}
+
+struct Continent{
+	string: name: required: description("The name of the continent");
+	string: description: required: description("A description of the continent, including its geography, culture, and notable features.");
+}
+
+struct Country{
+	string: name: required: description("The name of the country");
+	string: description: required: description("A description of the country, including its geography, culture, and notable features.");
+	int64: capital_id: required: reference(City.id): description("The capital city of the country, which is a city that serves as the political and administrative center of the country.");
+	int64: leader_id: required: reference(Character.id): description("The leader of the country, who is the person in charge of the country's government and administration.");
+	array<int64>: region_ids: optional: reference(Region.id): description("The regions in the country, which are areas that represent the country's geography and notable places."): unique: min_items(1);
+	array<int64>: city_ids: optional: reference(City.id): description("The cities in the country, which are cities that represent the country's geography and notable places."): unique: min_items(1);
+	array<int64>: location_ids: optional: reference(Location.id): description("The locations in the country, which are locations that represent the country's geography and notable places."): unique: min_items(1);
+}
+
+struct Region{
+	string: name: required: description("The name of the region");
+	string: description: required: description("A description of the region, including its geography, culture, and notable features.");
+	array<int64>: city_ids: optional: reference(City.id): description("The cities in the region, which are cities that represent the region's geography and notable places."): unique: min_items(1);
+	array<int64>: location_ids: optional: reference(Location.id): description("The locations in the region, which are locations that represent the region's geography and notable places."): unique: min_items(1);
+}
+
+struct City{
+	string: name: required: description("The name of the city");
+	string: description: required: description("A description of the city, including its geography, culture, and notable features.");
+	array<int64>: location_ids: optional: reference(Location.id): description("The locations in the city, which are locations that represent the city's geography and notable places."): unique: min_items(1);
+}
+
+struct Location{
+	string: name: required: description("The name of the location");
+	string: description: required: description("A description of the location, including its significance, history, and notable features.");
+	bool: inside: required: description("Whether or not the location is inside a building. If true, the location is inside a building and can be used for indoor activities. If false, the location is outside and can be used for outdoor activities.");
+	float: latitude: required: description("The latitude of the location, which is a floating-point number representing the north-south position of the location on the Worlds's surface.");
+	float: longitude: required: description("The longitude of the location, which is a floating-point number representing the east-west position of the location on the Worlds's surface.");
+	int64: color: required: description("The color of the location, which is an integer representing the color in RGB format. For example, 0xFF0000 represents red, 0x00FF00 represents green, and 0x0000FF represents blue.");
+}
+
+struct Church{
+	string: name: required: description("The name of the church");
+	string: description: required: description("A description of the church, including its beliefs, practices, and notable features.");
+	int64: religion_id: required: reference(Religion.id): description("The religion that the church is associated with, which is a religion that represents the church's beliefs and values.");
+	int64: leader_id: required: reference(Character.id): description("The leader of the church, who is a character that represents the church's leadership and authority.");
+	int64: primary_god_id: required: reference(Character.id): description("The primary god of the church, who is a character that represents the church's central deity and focus of worship.");
+	int64: location_id: required: reference(Location.id): description("The location of the church, which is a location that serves as the central hub for the church's activities and operations.");
+	array<int64>: clergy_member_ids: optional: reference(Character.id): description("The clergy members of the church, who are characters that represent the church's leadership and authority."): unique: min_items(1);
+}
+
+struct Spell{
+	string: name: required: description("The name of the spell");
+	string: description: required: description("A description of the spell, including its effects, casting time, and requirements.");
+	int64: level: required: description("The level of the spell, ranging from 1 to 20, where 1 is the weakest and 20 is the strongest.");
+	MagicSchool: required: description("The magic school of the spell, which is a category that represents the spell's type and characteristics. For example, 'Evocation', 'Illusion', 'Necromancy', etc.");
+	bool: ritual: required: description("Whether or not the spell is a ritual. If true, the spell can be cast as a ritual, which allows it to be cast without expending a spell slot but takes longer to cast.");
+	int8: castingTime: required: description("The casting time of the spell, which is an integer representing the time it takes to cast the spell in seconds. For example, 1 means it takes 1 second to cast, 2 means it takes 2 seconds, etc.");
+}
+
+struct Items{
+	string: name: required: description("The name of the item");
+	string: description: required: description("A description of the item, including its purpose, features, and any notable characteristics.");
+	ItemType: itemType: required: description("The type of the item, which is a category that represents the item's function and characteristics. For example, 'Weapon', 'Armor', 'Potion', etc.");
+	float: weight: required: description("The weight of the item, which is a floating-point number representing the item's mass in kilograms.");
+	float: value: required: description("The value of the item, which is a floating-point number representing the item's worth in the game's currency.");
+	bool: consumable: required: description("Whether or not the item is consumable. If true, the item can be used up and will be removed from the inventory upon use.");
+	bool: stackable: required: description("Whether or not the item is stackable. If true, multiple instances of the item can be combined into a single stack in the inventory.");
+	int8: maxStackSize: required: description("The maximum stack size of the item, which is an integer representing the maximum number of instances of the item that can be combined into a single stack in the inventory. For example, 1 means the item cannot be stacked, 10 means up to 10 instances can be stacked, etc.");
+	EquipSlot: equipSlot: optional: description("The equip slot of the item, which is a category that represents the item's intended slot for equipping on a character. If the item is not equippable, this field can be null. For example, 'Head', 'Chest', 'Legs', 'Feet', 'Hands', 'Weapon', 'Ring', 'Necklace'.");
+	bool: twoHanded: optional: description("Whether or not the item is two-handed. If true, the item requires both hands to equip and cannot be used with a shield or off-hand item. If false, the item can be used with a shield or off-hand item.");
+}
+
+struct Government{
+	string: name: required: description("The name of the government");
+	string: description: required: description("A description of the government, including its structure, policies, and notable features.");
+	GovernmentType: type: required: description("The type of the government, which is a category that represents the government's structure and organization. For example, 'Democracy', 'Monarchy', 'Dictatorship', etc.");
+	bool: enforcedReligion: required: description("Whether or not the government enforces a specific religion. If true, the government requires its citizens to follow a specific religion and may impose penalties for non-compliance. If false, the government allows freedom of religion and does not enforce any specific religion.");
+	int64: religionToEnforce_id: optional: reference(Religion.id): description("The religion that the government enforces, which is a religion that represents the government's official faith and practices. If the government does not enforce any specific religion, this field can be null.");
+}
+
+struct Class{
+	string: name: required: description("The name of the class");
+	string: description: required: description("A description of the class, including its role, abilities, and notable features.");
+	int64: religion_id: optional: reference(Religion.id): description("The religion that the class is associated with, which is a religion that represents the class's beliefs and values. If the class does not have a specific religion, this field can be null.");
+	array<Ability>: abilities: required: description("The abilities of the class, which are abilities that represent the class's skills, powers, and special features."): unique: min_items(1);
+}
+
+enum MagicSchool{
+	Abjuration,
+	Conjuration,
+	Divination,
+	Enchantment,
+	Evocation,
+	Illusion,
+	Necromancy,
+	Transmutation,
+	Universal
+}
+
+enum ItemType{
+	Weapon,
+	Armor,
+	Potion,
+	Scroll,
+	Ring,
+	Necklace,
+	Shield,
+	OffHand,
+	Consumable,
+	Miscellaneous
+}
+
+enum MagicComponent{
+	V,
+	S,
+	M,
+	VSM
+}
+
+enum GovernmentType{
+		Monarchy,
+		Republic,
+		Theocracy,
+		Dictatorship,
+		Anarchy,
+		Oligarchy,
+		Plutocracy,
+		Tyranny
+}
+
+enum EquipSlot{
+	Head,
+	Chest,
+	Legs,
+	Feet,
+	Hands,
+	Weapon,
+	Ring,
+	Necklace
+}
+
+struct User {
+	string: username: required: description("The unique username of the user.");
+	string: displayName: required: description("The unique username of the user."):gens_disabled(SQLite);
+	string: email: required: description("The email address of the user."):gens_disabled(SQLite);
+	string: password_hash: required: description("The hashed password of the user for authentication.");
+	string: role: required: description("The role of the user, defining their permissions and access level.");
+	string: created_at: required: description("The timestamp when the user was created.");
+	string: updated_at: required: description("The timestamp when the user was last updated.");
+}
+
+enum EndpointType:gens_disabled(MySQL) {
+	REST,
+	GraphQL,
+	gRPC,
+	OpenAPI
+}
+
+
+struct ModelInfo {
+	string: name: required: description("The name of the model.");
+	string: created: required: description("The creation timestamp of the model.");
+	string: owned_by: required: description("The owner of the model.");
+}
+
+struct Profile:gens_disabled(MySQL) {
+	string: name: required: description("The name of the profile.");
+	string: base_url: required: description("The base URL associated with the profile.");
+	string: api_key: required: description("The API key associated with the profile.");
+	string: model: required: description("The model associated with the profile.");
+	string: system_message: required: description("The system message associated with the profile.");
+	float: temperature: required: description("The temperature setting for the profile.");
+	int8: max_tokens: required: description("The maximum number of tokens for the profile.");
+	int8: context_length: required: description("The context length for the profile.");
+	EndpointType: endpoint_type: required: description("The type of API endpoint the profile uses.");
+	bool: use_tools: required: description("Whether the profile uses external tools.");
+	bool: stream_mode: required: description("Whether the profile streams responses.");
+	bool: use_structured_output: required: description("Whether the profile uses structured output.");
+	string: json_schema_name: required: description("The name of the JSON schema associated with the profile.");
+	bool: json_schema_strict: required: description("Whether the JSON schema validation is strict.");
+	string: json_schema_definition: required: description("The JSON schema definition associated with the profile.");
+	bool: use_all_tools: required: description("Whether the profile uses all available tools.");
+	array<int8>: tool_selection: required: description("The selection of tools available to the profile.");
+	bool: show_system_messages: required: description("Whether to show system messages.");
+	array<ModelInfo>: models: required: description("The models associated with the profile.");
+	bool: models_fetched: required: description("Whether the models have been fetched.");
+}
+
+struct Message:gens_disabled(MySQL) {
+	string: role: required: description("The role of the message sender.");
+	string: content: required: description("The content of the message.");
+}

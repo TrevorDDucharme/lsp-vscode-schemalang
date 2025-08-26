@@ -1,0 +1,110 @@
+{
+	"name": "schemalang",
+	"displayName": "SchemaLang",
+	"description": "SchemaLang — a schema definition language with multi-target code generation (C++, JSON, MySQL, SQLite, and more)",
+	"author": "Trevor Ducharme",
+	"license": "MIT",
+	"version": "1.0.0",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/ReapersSoul/lsp-vscode-schemalang"
+	},
+	"publisher": "schemalang",
+	"categories": ["Other"],
+	"keywords": [
+		"schemalang",
+		"schema",
+		"codegen",
+		"cpp",
+		"json",
+		"sqlite",
+		"mysql"
+	],
+	"engines": {
+		"vscode": "^1.100.0"
+	},
+	"activationEvents": [
+		"onLanguage:schemalang",
+		"onFileSystem:schemalang",
+		"onLanguage:plaintext"
+	],
+	"main": "./client/out/extension",
+	"contributes": {
+		"semanticTokenTypes": [
+			{ "id": "type", "description": "SchemaLang type names (structs, enums)" },
+			{ "id": "builtin", "description": "SchemaLang builtin/primitive types (int8,bool,string,array,...)" },
+			{ "id": "variable", "description": "SchemaLang variable/field names" },
+			{ "id": "modifier", "description": "SchemaLang modifiers (required, optional, etc.)" },
+			{ "id": "gen_modifier", "description": "Generator-specific modifiers (gens_enabled/disabled arguments)" },
+			{ "id": "generator", "description": "Known generator names used inside gens_enabled/disabled" },
+			{ "id": "comment", "description": "Comments" },
+			{ "id": "string", "description": "String literals" }
+		],
+		"languages": [
+			{
+				"id": "schemalang",
+				"aliases": ["SchemaLang", "schemalang"],
+				"extensions": [".schema", ".schemalang"],
+				"configuration": "./language-configuration.json"
+			}
+		],
+		"semanticTokenScopes": [
+			{
+				"language": "schemalang",
+				"scopes": {
+					"type": ["entity.name.type"],
+					"builtin": ["keyword.other"],
+					"variable": ["variable.other"],
+					"modifier": ["keyword.other"],
+					"gen_modifier": ["keyword.other"],
+					"generator": ["entity.name.type"],
+					"comment": ["comment"],
+					"string": ["string"]
+				}
+			}
+		],
+
+
+		"configuration": {
+			"type": "object",
+			"title": "SchemaLang configuration",
+			"properties": {
+				"languageServerExample.maxNumberOfProblems": {
+					"scope": "resource",
+					"type": "number",
+					"default": 100,
+					"description": "Controls the maximum number of problems produced by the server."
+				},
+				"languageServerExample.trace.server": {
+					"scope": "window",
+					"type": "string",
+					"enum": [
+						"off",
+						"messages",
+						"verbose"
+					],
+					"default": "off",
+					"description": "Traces the communication between VS Code and the language server."
+				}
+			}
+		}
+	},
+	"scripts": {
+		"vscode:prepublish": "npm run compile",
+		"compile": "tsc -b",
+		"watch": "tsc -b -w",
+		"lint": "eslint",
+		"postinstall": "cd client && npm install && cd ../server && npm install && cd ..",
+		"test": "sh ./scripts/e2e.sh"
+	},
+	"devDependencies": {
+		"@eslint/js": "^9.13.0",
+		"@stylistic/eslint-plugin": "^2.9.0",
+		"@types/mocha": "^10.0.6",
+		"@types/node": "^22",
+		"eslint": "^9.13.0",
+		"mocha": "^10.3.0",
+		"typescript": "^5.9.2",
+		"typescript-eslint": "^8.39.0"
+	}
+}

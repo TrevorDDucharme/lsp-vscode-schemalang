@@ -1,0 +1,6 @@
+struct Profile:gens_disabled(MySQL) {
+    int64: id: required: description("identifier");
+}
+
+// line for completion tests: gens_disabled( so completion provider can trigger at this comment
+// gens_disabled(
