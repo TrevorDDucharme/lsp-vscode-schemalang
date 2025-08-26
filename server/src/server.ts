@@ -518,7 +518,11 @@ function provideSemanticTokensFull(textDocument: TextDocument): SemanticTokens {
 					const innerOffsetInType = gm[0].indexOf(inner);
 					const innerPos = typePos + gm.index + innerOffsetInType;
 					if (innerPos >= 0 && !isOverlapping(lineIndex, innerPos, inner.length)) {
-						collected.push({ line: lineIndex, start: innerPos, len: inner.length, t: tokenTypeToIndex['builtin'], mod: 0 });
+						// If the inner generic name matches a builtin type, mark it as 'builtin',
+						// otherwise treat it as a user-defined 'type' (e.g., array<Ability> -> Ability is a type)
+						const innerLower = inner.toLowerCase();
+						const isBuiltinInner = builtinTypes.some(bt => bt.toLowerCase() === innerLower);
+						collected.push({ line: lineIndex, start: innerPos, len: inner.length, t: tokenTypeToIndex[isBuiltinInner ? 'builtin' : 'type'], mod: 0 });
 						markOccupied(lineIndex, innerPos, inner.length);
 					}
 					// emit the generic keyword (e.g., 'array') as a type token as well
