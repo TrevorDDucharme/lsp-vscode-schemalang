@@ -1,0 +1,128 @@
+struct Color{
+    float: r:description("Red channel of the color, ranging from 0.0 to 1.0");
+    float: g:description("Green channel of the color, ranging from 0.0 to 1.0");
+    float: b:description("Blue channel of the color, ranging from 0.0 to 1.0");
+    float: a:description("Alpha channel of the color, ranging from 0.0 (transparent) to 1.0 (opaque)");
+}
+
+struct GuiTheme
+{
+    // Font settings
+    string: defaultFontFamily:description("The default font family for the GUI.");
+    float: defaultFontSize:description("The default font size for the GUI.");
+    
+    // Complete set of ImGui colors for full UI customization
+    // Text colors
+    Color: textColor: reference(Color.id): description("Primary text color used throughout the GUI.");
+    Color: textDisabledColor: reference(Color.id): description("Color for disabled or inactive text elements.");
+    Color: textSelectedBgColor: reference(Color.id): description("Background color for selected text.");
+
+    // Main backgrounds
+    Color: mainBgColor: reference(Color.id): description("Primary background color for the main application window.");
+    Color: windowBgColor: reference(Color.id): description("Background color for secondary windows and panels.");
+    Color: childBgColor: reference(Color.id): description("Background color for child windows or nested panels.");
+    Color: popupBgColor: reference(Color.id): description("Background color for popup elements like context menus.");
+    Color: borderColor: reference(Color.id): description("Color of borders around various UI elements.");
+    Color: borderShadowColor: reference(Color.id): description("Shadow color for borders to create depth.");
+    // Frame elements
+    Color: frameColor: reference(Color.id): description("Background color for frame elements like input boxes and combo boxes.");
+    Color: frameHoverColor: reference(Color.id): description("Background color when hovering over frame elements.");
+    Color: frameActiveColor: reference(Color.id): description("Background color when frame elements are active or focused.");
+
+    // Title bar
+    Color: titleBgColor: reference(Color.id): description("Background color for title bars of windows.");
+    Color: titleBgActiveColor: reference(Color.id): description("Background color for active or focused title bars.");
+    Color: titleBgCollapsedColor: reference(Color.id): description("Background color for collapsed title bars.");
+
+    // Menu bar
+    Color: menuBarBgColor: reference(Color.id): description("Background color for menu bars.");
+
+    // Scrollbar
+    Color: scrollbarBgColor: reference(Color.id): description("Background color for scrollbars.");
+    Color: scrollbarGrabColor: reference(Color.id): description("Color of the scrollbar grab handle.");
+    Color: scrollbarGrabHoverColor: reference(Color.id): description("Color of the scrollbar grab handle when hovered.");
+    Color: scrollbarGrabActiveColor: reference(Color.id): description("Color of the scrollbar grab handle when active or dragged.");
+
+    // Checkmark and sliders
+    Color: checkMarkColor: reference(Color.id): description("Color of checkmarks in checkboxes.");
+    Color: sliderGrabColor: reference(Color.id): description("Color of the slider grab handle.");
+    Color: sliderGrabActiveColor: reference(Color.id): description("Color of the slider grab handle when active or dragged.");
+
+    // Buttons
+    Color: buttonColor: reference(Color.id): description("Background color for buttons.");
+    Color: buttonHoverColor: reference(Color.id): description("Background color for buttons when hovered.");
+    Color: buttonActiveColor: reference(Color.id): description("Background color for buttons when active or pressed.");
+
+    // Headers (collapsible sections)
+    Color: headerColor: reference(Color.id): description("Background color for header elements.");
+    Color: headerHoveredColor: reference(Color.id): description("Background color for header elements when hovered.");
+    Color: headerActiveColor: reference(Color.id): description("Background color for header elements when active or pressed.");
+
+    // Separators
+    Color: separatorColor: reference(Color.id): description("Color of separator lines between UI elements.");
+    Color: separatorHoveredColor: reference(Color.id): description("Color of separator lines when hovered.");
+    Color: separatorActiveColor: reference(Color.id): description("Color of separator lines when active or pressed.");
+
+    // Resize grips
+    Color: resizeGripColor: reference(Color.id): description("Color of resize grip handles.");
+    Color: resizeGripHoveredColor: reference(Color.id): description("Color of resize grip handles when hovered.");
+    Color: resizeGripActiveColor: reference(Color.id): description("Color of resize grip handles when active or pressed.");
+
+    // Tabs
+    Color: tabColor: reference(Color.id): description("Background color for tabs.");
+    Color: tabHoverColor: reference(Color.id): description("Background color for tabs when hovered.");
+    Color: tabActiveColor: reference(Color.id): description("Background color for active or selected tabs.");
+    Color: tabUnfocusedColor: reference(Color.id): description("Background color for unfocused tabs.");
+    Color: tabUnfocusedActiveColor: reference(Color.id): description("Background color for active tabs when unfocused.");
+
+    // Plot and visualizations
+    Color: plotLinesColor: reference(Color.id): description("Color of plot lines in graphs.");
+    Color: plotLinesHoveredColor: reference(Color.id): description("Color of plot lines when hovered.");
+    Color: plotHistogramColor: reference(Color.id): description("Color of histogram bars in plots.");
+    Color: plotHistogramHoveredColor: reference(Color.id): description("Color of histogram bars when hovered.");
+
+    // Tables
+    Color: tableHeaderBgColor: reference(Color.id): description("Background color for table headers.");
+    Color: tableBorderStrongColor: reference(Color.id): description("Color of strong table borders.");
+    Color: tableBorderLightColor: reference(Color.id): description("Color of light table borders.");
+
+    // Drag and drop
+    Color: dragDropTargetColor: reference(Color.id): description("Color of drag and drop target highlights.");
+
+    // Navigation
+    Color: navHighlightColor: reference(Color.id): description("Color of navigation highlights.");
+    Color: navWindowingHighlightColor: reference(Color.id): description("Color of windowing navigation highlights.");
+    Color: navWindowingDimBgColor: reference(Color.id): description("Background color for dimmed windowing navigation.");
+
+    // Modal
+    Color: modalWindowDimBgColor: reference(Color.id): description("Background color for dimmed modal windows.");
+    // Accent colors
+    Color: accentColor: reference(Color.id): description("Primary accent color.");
+    Color: secondaryAccentColor: reference(Color.id): description("Secondary accent color.");
+}
+
+// Structure for group colors with named fields
+struct GroupTheme
+{
+    Color: baseColor: reference(Color.id): description("Base color for the group.");
+    Color: hoverColor: reference(Color.id): description("Color when the group is hovered.");
+    Color: activeColor: reference(Color.id): description("Color when the group is active or selected.");
+    Color: textColor: reference(Color.id): description("Text color for the group.");
+    string: icon: description("Icon representing the group.");
+    GuiTheme: innerTheme: reference(GuiTheme.id): description("Inner theme for nested UI elements.");
+}
+
+struct AppTheme
+{
+    // Theme metadata
+    string: name: description("Name of the theme.");
+    string: author: description("Author of the theme.");
+    string: description: description("Description of the theme.");
+    GuiTheme: guiTheme: reference(GuiTheme.id): description("Main theme object.");
+    // Group-to-color map for dynamic editor group styling
+    array<GroupTheme>: groupColorMap: description("Map of group colors for dynamic editor styling.");
+    // Default colors for groups not explicitly defined
+    GroupTheme: defaultGroupColor: reference(GroupTheme.id): description("Default color scheme for groups without explicit definitions.");
+    Color: textQuoteColor: reference(Color.id): description("Color for quoted text.");
+    Color: textActionColor: reference(Color.id): description("Color for actionable text.");
+}

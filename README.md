@@ -12,6 +12,7 @@ SchemaLangTranspiler -schemaDirectory=<path> -outputDirectory=<path> [flags]
 
 ### Required Parameters
 - `-schemaDirectory=<path>` - Path to directory containing `.schema` or `.schemaLang` files
+- `-schema=<file>` - Path to a single `.schema` or `.schemaLang` file (alternative to `-schemaDirectory`)
 - `-outputDirectory=<path>` - Path where generated files will be created
 
 ### Generator Flags
@@ -63,6 +64,21 @@ SchemaLangTranspiler -schemaDirectory=./schemas -outputDirectory=./output -mysql
 ```bash
 SchemaLangTranspiler -schemaDirectory=./schemas -outputDirectory=./output -additionalGenerators=./generators -cpp -json
 ```
+
+### Including other schemas
+
+SchemaLang supports including other schema files from within a schema using an include directive. This lets you split definitions across files and reference types defined elsewhere. Example:
+
+```
+include "./other.schema"
+
+struct LocalStruct {
+    OtherStruct: required: description("References a struct defined in other.schema");
+}
+```
+
+When a schema file includes another file, the included file's definitions are merged into the same ProgramStructure so you can use types, enums, and other definitions from the included file as if they were defined in the current file.
+
 
 ### Output Structure
 Generated files are organized in subdirectories based on the target:
@@ -413,6 +429,43 @@ struct DClass {
     string: reason: required: description("The reason for the D-Class being in foundation possession");
 }
 ```
+
+### Equivalent representations
+
+The two snippets below are equivalent: they both model a one-to-many or many-to-one relationship where a Character can have multiple aliases. The first form represents aliases as a separate struct with a foreign key to `Character.id`. The second form places an array of alias objects directly on `Character`. Depending on the target generator, these can produce the same underlying schema (for example, a separate SQL table for aliases with a foreign key to the character, or an embedded array in a JSON schema). 
+
+Equivalent (separate alias struct with foreign key):
+
+```
+struct CharacterAlias {
+    string: alias: required: description("An alternative name or nickname for a character");
+    int64: character_id: required: reference(Character.id): description("The ID of the character this alias belongs to");
+}
+
+struct Character {
+    string: name: required: description("The name for a character");
+}
+```
+
+Equivalent (array field on Character):
+
+```
+struct CharacterAlias {
+    string: alias: required: description("An alternative name or nickname for a character");
+}
+
+struct Character {
+    string: name: required: description("The name for a character");
+    array<CharacterAlias>: aliases: required: description("Aliases for the character");
+}
+```
+
+How these map in generators:
+- SQL generators (MySQL/SQLite) will usually create a separate `CharacterAlias` table and add a foreign key `character_id` referencing `Character.id` (matching the first form). When the schema uses an `array<...>` of a complex type, generators commonly flatten that into a separate table with a foreign key as well.
+- JSON-schema generators will typically represent the second form as an array of objects inside the `Character` schema, while the first form will be two separate definitions with a relationship documented via references.
+
+Both forms express the same logical relationship (one Character -> many Aliases); choose the style that best fits your readability or generator behavior.
+
 
 ### Enum with Mixed Value Assignment
 ```

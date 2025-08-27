@@ -18,8 +18,11 @@ import {
 	DocumentDiagnosticReportKind,
 	type DocumentDiagnosticReport
     , SemanticTokensBuilder, SemanticTokens
+    , Hover, MarkupKind
 } from 'vscode-languageserver/node';
 import * as fs from 'fs';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
 
 import {
 	TextDocument
@@ -56,9 +59,11 @@ connection.onInitialize((params: InitializeParams) => {
 	const result: InitializeResult = {
 		capabilities: {
 			textDocumentSync: TextDocumentSyncKind.Incremental,
+			hoverProvider: true,
 			// Tell the client that this server supports code completion.
 			completionProvider: {
-				resolveProvider: true
+				resolveProvider: true,
+				triggerCharacters: ['(', ',']
 			},
 			diagnosticProvider: {
 				interFileDependencies: false,
@@ -149,6 +154,36 @@ documents.onDidClose(e => {
 	documentSettings.delete(e.document.uri);
 });
 
+// --- Semantic tokens related constants (hoisted) ----------------------------------------
+// These are used by validator/hover collectors as well as the semantic token provider.
+const tokenTypeToIndex: { [s: string]: number } = {};
+['type', 'variable', 'builtin', 'modifier', 'gen_modifier', 'generator', 'comment', 'string'].forEach((t, i) => tokenTypeToIndex[t] = i);
+
+const rxComment = /\/\/.*|\/\*[\s\S]*?\*\//g;
+const rxString = /"(?:\\.|[^"\\])*"/g;
+const rxStructEnum = /^\s*(struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)/;
+// include directive: include "./other.schema" or include './other.schema'
+const rxInclude = /^\s*include\s+["'](.+?)["']/i;
+// field: type: name: ...  -- tighten to require type start with letter/underscore
+const rxField = /^\s*([A-Za-z_][A-Za-z0-9_<>,\s]*)\s*:\s*([A-Za-z_][A-Za-z0-9_]*)/;
+// generic array matcher, allow optional spaces inside angle brackets
+const rxTypeGeneric = /\barray\s*<\s*([A-Za-z_][A-Za-z0-9_]*)\s*>/gi;
+// modifiers and parameterized modifiers (exclude 'reference' and gens_ handled by dedicated regexes)
+// make modifier matching case-insensitive to be more robust
+const rxModifier = /\b(required|optional|unique|auto_increment|primary_key|min_items|max_items|min|max|description)\b/gi;
+const rxReference = /reference\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/g;
+// gens_ may contain generator names with letters, numbers, and underscores; case-insensitive
+const rxGens = /gens_(enabled|disabled)\s*\(\s*([A-Za-z0-9_\-,\s]+)\s*\)/gi;
+// simple gens_ token (no parentheses) e.g. a standalone 'gens_disabled'
+const rxGensSimple = /\bgens_(enabled|disabled)\b/gi;
+// known generators to highlight specially when appearing as arguments inside gens_enabled/disabled
+const knownGenerators = ['Cpp','Java','MySQL','SQLite','JSON','Lua'];
+
+// builtin/primitive types to highlight as 'type'
+const builtinTypes = ['bool','string','int8','int16','int32','int64','uint8','uint16','uint32','uint64','float','double','array','void','pointer'];
+// match builtin type names as whole words (case-insensitive)
+const rxBuiltin = new RegExp('\\b(' + builtinTypes.join('|') + ')\\b','gi');
+
 
 connection.languages.diagnostics.on(async (params) => {
 	const document = documents.get(params.textDocument.uri);
@@ -180,8 +215,94 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 	// Simple SchemaLang parser-based diagnostics.
 	const text = textDocument.getText();
 	const lines = text.split(/\r?\n/);
+
+	// Remove block comments (/* ... */) from lines while preserving line indices
+	function stripBlockComments(inputLines: string[]) {
+		const out: string[] = [];
+		let inBlock = false;
+		for (let li = 0; li < inputLines.length; li++) {
+			let l = inputLines[li];
+			if (inBlock) {
+				const endIdx = l.indexOf('*/');
+				if (endIdx >= 0) {
+					// keep remainder after comment end
+					l = l.substring(endIdx + 2);
+					inBlock = false;
+					// continue to strip any further block comments on this line
+				} else {
+					// whole line inside comment -> produce empty line and continue
+					out.push('');
+					continue;
+				}
+			}
+			// remove any block comments that start and end on this line or start here
+			let startIdx = l.indexOf('/*');
+			while (startIdx >= 0) {
+				const endIdx = l.indexOf('*/', startIdx + 2);
+				if (endIdx >= 0) {
+					// remove the /* ... */ portion
+					l = l.substring(0, startIdx) + l.substring(endIdx + 2);
+					startIdx = l.indexOf('/*');
+					continue;
+				} else {
+					// starts a block that continues on following lines
+					l = l.substring(0, startIdx);
+					inBlock = true;
+					break;
+				}
+			}
+			out.push(l);
+		}
+		return out;
+	}
+
+	const procLines = stripBlockComments(lines);
 	const diagnostics: Diagnostic[] = [];
 	let problems = 0;
+
+	// Collect defined types (structs/enums) in this document and any included files
+	const definedTypes = new Set<string>();
+	// local regexes to avoid relying on later declarations
+	const localStructHeader = /^\s*struct\s+([A-Za-z_][A-Za-z0-9_]*)(\s*:\s*[^\{]+)?\s*\{?/;
+	const localEnumHeader = /^\s*enum\s+([A-Za-z_][A-Za-z0-9_]*)(\s*:\s*[^\{]+)?\s*\{?/;
+	const localRxInclude = /^\s*include\s+["'](.+?)["']/i;
+
+	for (let li = 0; li < procLines.length; li++) {
+		const ln = procLines[li];
+		let mh;
+		if ((mh = localStructHeader.exec(ln))) {
+			definedTypes.add(mh[1]);
+			continue;
+		}
+		if ((mh = localEnumHeader.exec(ln))) {
+			definedTypes.add(mh[1]);
+			continue;
+		}
+		// include directives: try to read included file and collect its defined types (non-recursive)
+		let iim;
+		if ((iim = localRxInclude.exec(ln))) {
+			const includePath = iim[1];
+			try {
+				let baseDir = '';
+				if (textDocument && textDocument.uri && textDocument.uri.startsWith('file:')) {
+					const filePath = fileURLToPath(textDocument.uri);
+					baseDir = path.dirname(filePath);
+				}
+				const resolved = path.resolve(baseDir || process.cwd(), includePath);
+				if (fs.existsSync(resolved)) {
+					const incText = fs.readFileSync(resolved, 'utf8');
+					const incLines = incText.split(/\r?\n/);
+					for (const ilin of incLines) {
+						let sm;
+						if ((sm = localStructHeader.exec(ilin))) definedTypes.add(sm[1]);
+						if ((sm = localEnumHeader.exec(ilin))) definedTypes.add(sm[1]);
+					}
+				}
+			} catch (e) {
+				// ignore include read errors
+			}
+		}
+	}
 
 	// Helpers
 	function mkDiag(line: number, startChar: number, endChar: number, message: string, severity: DiagnosticSeverity = DiagnosticSeverity.Error) {
@@ -211,9 +332,12 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 	const fieldLine = /^\s*([A-Za-z0-9_<>,]+)\s*:\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$/;
 	const enumItem = /^\s*([A-Za-z_][A-Za-z0-9_]*)(\s*=\s*\d+)?\s*,?\s*(\/\/.*)?$/;
 
-	for (let i = 0; i < lines.length; i++) {
-		const line = lines[i];
+	for (let i = 0; i < procLines.length; i++) {
+		const line = procLines[i];
+		
 		if (line.match(/^\s*$/)) continue;
+		// skip lines that are just an opening brace (possibly followed by comments)
+		if (/^\s*\{/.test(line)) continue;
 		let m;
 		if ((m = structHeader.exec(line))) {
 			stack.push({ type: 'struct', name: m[1], line: i });
@@ -221,10 +345,31 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 			if (!line.includes('{')) {
 				// lookahead for next non-empty char
 				let found = false;
-				for (let j = i + 1; j < Math.min(i + 3, lines.length); j++) {
-					if (lines[j].includes('{')) { found = true; break; }
+				for (let j = i + 1; j < Math.min(i + 3, procLines.length); j++) {
+					if (procLines[j].includes('{')) { found = true; break; }
 				}
 				if (!found) mkDiag(i, 0, line.length, `Missing '{' after struct ${m[1]}`);
+			}
+			continue;
+		}
+
+		// include directive handling in validator
+		let im;
+		if ((im = rxInclude.exec(line))) {
+			const includePath = im[1];
+			// Try to resolve relative to document URI if possible
+			try {
+				let baseDir = '';
+				if (textDocument && textDocument.uri && textDocument.uri.startsWith('file:')) {
+					const filePath = fileURLToPath(textDocument.uri);
+					baseDir = path.dirname(filePath);
+				}
+				const resolved = path.resolve(baseDir || process.cwd(), includePath);
+				if (!fs.existsSync(resolved)) {
+					mkDiag(i, line.indexOf(includePath), line.indexOf(includePath) + includePath.length, `Included file not found: ${includePath}`, DiagnosticSeverity.Warning);
+				}
+			} catch (e) {
+				// ignore resolution errors
 			}
 			continue;
 		}
@@ -232,8 +377,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 			stack.push({ type: 'enum', name: m[1], line: i });
 			if (!line.includes('{')) {
 				let found = false;
-				for (let j = i + 1; j < Math.min(i + 3, lines.length); j++) {
-					if (lines[j].includes('{')) { found = true; break; }
+				for (let j = i + 1; j < Math.min(i + 3, procLines.length); j++) {
+					if (procLines[j].includes('{')) { found = true; break; }
 				}
 				if (!found) mkDiag(i, 0, line.length, `Missing '{' after enum ${m[1]}`);
 			}
@@ -249,6 +394,11 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 		}
 		// inside struct: validate field lines
 		if (stack.length > 0 && stack[stack.length - 1].type === 'struct') {
+			// Only attempt to parse field lines if the line contains a ':'
+			if (!line.includes(':')) {
+				// allow closing brace handled above and comments
+				continue;
+			}
 			if (!fieldLine.test(line)) {
 				// allow closing brace handled above
 				if (!line.trim().startsWith('//')) {
@@ -264,6 +414,26 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 					const inner = typePart.replace(/<.*>/, '');
 					if (!/^[A-Za-z0-9_]+$/.test(inner)) {
 						mkDiag(i, line.indexOf(typePart), line.indexOf(typePart) + typePart.length, `Malformed type '${typePart}'`);
+					}
+
+					// Check that referenced type(s) are defined (or builtin). Handle array<Inner> generics.
+					const genericMatch = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*<\s*([A-Za-z_][A-Za-z0-9_]*)\s*>\s*$/i.exec(typePart);
+					if (genericMatch) {
+						const outer = genericMatch[1];
+						const innerType = genericMatch[2];
+						// outer type (e.g., array) may be builtin; inner must be builtin or defined
+						const innerLower = innerType.toLowerCase();
+						const isInnerBuiltin = builtinTypes.some(bt => bt.toLowerCase() === innerLower);
+						if (!isInnerBuiltin && !definedTypes.has(innerType)) {
+							mkDiag(i, line.indexOf(innerType), line.indexOf(innerType) + innerType.length, `Type '${innerType}' is not defined (used in ${outer})`);
+						}
+					} else {
+						// direct type name: must be builtin or defined
+						const typeName = inner;
+						const isBuiltin = builtinTypes.some(bt => bt.toLowerCase() === typeName.toLowerCase());
+						if (!isBuiltin && !definedTypes.has(typeName)) {
+							mkDiag(i, line.indexOf(typePart), line.indexOf(typePart) + typePart.length, `Type '${typeName}' is not defined`);
+						}
 					}
 					// check for at least one description(...) modifier as README suggests descriptions are important
 					if (!/description\s*\(/.test(mods) && !mods.includes('description:') && !mods.includes('description')) {
@@ -302,8 +472,26 @@ connection.onDidChangeWatchedFiles(_change => {
 
 // This handler provides the initial list of the completion items.
 connection.onCompletion(
-	(_textDocumentPosition: TextDocumentPositionParams): CompletionItem[] => {
-		// Provide SchemaLang-relevant completions
+	(textDocumentPosition: TextDocumentPositionParams): CompletionItem[] => {
+		// If the cursor is inside gens_enabled(...) or gens_disabled(...) parentheses,
+		// return completion items for known generators only.
+		try {
+			const doc = documents.get(textDocumentPosition.textDocument.uri);
+			if (doc) {
+				const pos = textDocumentPosition.position;
+				const lines = doc.getText().split(/\r?\n/);
+				const ln = lines[pos.line] || '';
+				const before = ln.substring(0, pos.character);
+				// If there's an unclosed gens_(enabled|disabled)(... up to the cursor, suggest generator names
+				if (/gens_(enabled|disabled)\s*\([^\)]*$/.test(before)) {
+					return knownGenerators.map((g, i) => ({ label: g, kind: CompletionItemKind.Value, data: 200 + i }));
+				}
+			}
+		} catch (e) {
+			// ignore and fall back to default completions
+		}
+
+		// Provide SchemaLang-relevant completions (fallback)
 		return [
 			{ label: 'struct', kind: CompletionItemKind.Keyword, data: 1 },
 			{ label: 'enum', kind: CompletionItemKind.Keyword, data: 2 },
@@ -316,6 +504,7 @@ connection.onCompletion(
 			,
 			// common modifiers seen in README and rpg.schema
 			{ label: 'required', kind: CompletionItemKind.Keyword, data: 20 },
+			{ label: 'include "', kind: CompletionItemKind.Snippet, data: 19 },
 			{ label: 'optional', kind: CompletionItemKind.Keyword, data: 21 },
 			{ label: 'unique', kind: CompletionItemKind.Keyword, data: 22 },
 			{ label: 'min_items(', kind: CompletionItemKind.Function, data: 23 },
@@ -332,7 +521,7 @@ connection.onCompletion(
 			{ label: 'SQLite', kind: CompletionItemKind.Value, data: 43 },
 			{ label: 'JSON', kind: CompletionItemKind.Value, data: 44 },
 			{ label: 'Lua', kind: CompletionItemKind.Value, data: 45 }
-			];
+		];
 	}
 );
 
@@ -355,34 +544,232 @@ connection.onCompletionResolve(
 // for open, change and close text document events
 documents.listen(connection);
 
+// Hover provider: show quick info for builtins and user-defined types
+// Recursively collect struct/enum definitions from a document and its includes.
+function collectDefinitionsForUri(docUri: string, text: string) {
+	const defs = new Map<string, { kind: 'struct' | 'enum', line: number, doc?: string }>();
+	const fieldsByStruct = new Map<string, Map<string, string>>();
+	const visited = new Set<string>();
+
+	const hStruct = /^\s*struct\s+([A-Za-z_][A-Za-z0-9_]*)/;
+	const hEnum = /^\s*enum\s+([A-Za-z_][A-Za-z0-9_]*)/;
+	const incRx = /^\s*include\s+["'](.+?)["']/i;
+
+	function addFromText(baseDir: string | undefined, txt: string, sourceKey: string) {
+		if (visited.has(sourceKey)) return;
+		visited.add(sourceKey);
+		const ls = txt.split(/\r?\n/);
+		let currentStruct: string | null = null;
+		for (let i = 0; i < ls.length; i++) {
+			const l = ls[i];
+			let m;
+			if ((m = hStruct.exec(l))) {
+				const sname = m[1];
+				defs.set(sname, { kind: 'struct', line: i, doc: sourceKey });
+				currentStruct = sname;
+				if (!fieldsByStruct.has(sname)) fieldsByStruct.set(sname, new Map());
+			}
+			if ((m = hEnum.exec(l))) {
+				defs.set(m[1], { kind: 'enum', line: i, doc: sourceKey });
+			}
+			// end of block
+			if (l.includes('}')) {
+				currentStruct = null;
+			}
+			// field matcher
+			const fm = rxField.exec(l);
+			if (fm && currentStruct) {
+				const fieldType = fm[1].trim();
+				const fieldName = fm[2].trim();
+				const map = fieldsByStruct.get(currentStruct)!;
+				map.set(fieldName, fieldType);
+			}
+			if ((m = incRx.exec(l))) {
+				const includePath = m[1];
+				try {
+					const resolved = baseDir ? path.resolve(baseDir, includePath) : path.resolve(process.cwd(), includePath);
+					if (fs.existsSync(resolved)) {
+						const realKey = resolved;
+						if (!visited.has(realKey)) {
+							const incText = fs.readFileSync(resolved, 'utf8');
+							addFromText(path.dirname(resolved), incText, realKey);
+						}
+					}
+				} catch (e) {
+					// ignore
+				}
+			}
+		}
+	}
+
+	// derive base dir from docUri if possible
+	let baseDir: string | undefined = undefined;
+	try {
+		if (docUri && docUri.startsWith('file:')) {
+			baseDir = path.dirname(fileURLToPath(docUri));
+		}
+	} catch (e) {
+		baseDir = undefined;
+	}
+	addFromText(baseDir, text, docUri || '<memory>');
+	return { defs, fieldsByStruct };
+}
+
+function getWordAt(text: string, line: number, character: number) {
+	const lines = text.split(/\r?\n/);
+	if (line < 0 || line >= lines.length) return '';
+	const ln = lines[line];
+	// word regex: letters, digits, underscore, angle brackets, dots, parentheses and commas
+	// This allows capturing constructs like reference(Type.member) or gens_enabled(Cpp,Java)
+	const regex = /[A-Za-z0-9_<>,\.()]+/g;
+	let m: RegExpExecArray | null;
+	while ((m = regex.exec(ln)) !== null) {
+		const s = m.index;
+		const e = s + m[0].length;
+		if (character >= s && character <= e) {
+			let token = m[0];
+			// If the token contains an opening parenthesis but no closing one
+			// (e.g. description("..."), where quotes stopped the regex),
+			// scan forward to the next ')' and include it in the token.
+			if (token.indexOf('(') >= 0 && token.indexOf(')') < 0) {
+				const closeIdx = ln.indexOf(')', e);
+				if (closeIdx >= 0) {
+					token = ln.substring(s, closeIdx + 1);
+				}
+			}
+			return token;
+		}
+	}
+	return '';
+}
+
+connection.onHover((params) => {
+	const doc = documents.get(params.textDocument.uri);
+	if (!doc) return { contents: [] } as Hover;
+	const text = doc.getText();
+	const word = getWordAt(text, params.position.line, params.position.character);
+	// debug log so we can see hover requests in extension host output
+	try { connection.console.log(`onHover: uri=${params.textDocument.uri} pos=${params.position.line}:${params.position.character} rawWord='${word}'`); } catch (e) {}
+	if (!word) return { contents: [] } as Hover;
+
+	// normalize generic like array<Ability> -> show Ability
+	const genMatch = /^([A-Za-z_][A-Za-z0-9_]*)<\s*([A-Za-z_][A-Za-z0-9_]*)\s*>$/.exec(word);
+	let label = word;
+	if (genMatch) label = genMatch[2];
+
+	// builtins
+	const builtinLower = builtinTypes.map(b => b.toLowerCase());
+	if (builtinLower.includes(label.toLowerCase())) {
+		try { connection.console.log(`onHover: '${label}' is builtin`); } catch (e) {}
+		return { contents: { kind: MarkupKind.PlainText, value: `${label} — builtin primitive type` } } as Hover;
+	}
+
+	// For modifier/gens detection, strip trailing parenthesized args so hovering on
+	// `description("...")` or `gens_disabled(MySQL)` will match the modifier name.
+	const labelNoArgs = label.replace(/\(.*\)$/, '');
+
+	// modifiers (required/optional/unique/etc.)
+	const modifierDescriptions: { [k: string]: string } = {
+		required: 'Field must have a value (required).',
+		optional: 'Field can be null or omitted (optional).',
+		unique: 'Field value must be unique across all instances.',
+		primary_key: 'Designates this field as a primary key.',
+		auto_increment: 'Automatically increments for new records (integer primary keys).',
+		min_items: 'Specifies the minimum number of items in an array: min_items(n).',
+		max_items: 'Specifies the maximum number of items in an array: max_items(n).',
+		min: 'Minimum value constraint.',
+		max: 'Maximum value constraint.',
+		description: 'Adds a documentation string: description("text").'
+	};
+	// add include hover separately
+	const includeHover = 'Includes another schema file. Usage: include "path/to/file.schema"';
+	const labelLower = labelNoArgs.toLowerCase();
+	if (Object.prototype.hasOwnProperty.call(modifierDescriptions, labelLower)) {
+		return { contents: { kind: MarkupKind.PlainText, value: `${labelNoArgs} — modifier\n${modifierDescriptions[labelLower]}` } } as Hover;
+	}
+
+	// gens_ modifiers (gens_enabled/gens_disabled) — also show generator args if hovering over them
+	if (labelLower === 'gens_enabled' || labelLower === 'gens_disabled') {
+		const isEnabled = labelLower === 'gens_enabled';
+		return { contents: { kind: MarkupKind.PlainText, value: `${labelNoArgs} — ${isEnabled ? 'Enables' : 'Disables'} generation for the listed generators. Example: gens_enabled(Cpp,Java)` } } as Hover;
+	}
+
+	// include keyword hover
+	if (labelLower === 'include') {
+		return { contents: { kind: MarkupKind.PlainText, value: includeHover } } as Hover;
+	}
+
+
+	// If hovering over a generator argument inside gens_enabled(...) we already handle knownGenerators above.
+
+	// gather definitions from this doc and its includes
+	const { defs, fieldsByStruct } = collectDefinitionsForUri(doc.uri, text);
+
+	// If hovering over a dotted identifier like Type.member (this is common when
+	// the cursor is inside reference(Type.member) since parentheses are split out),
+	// provide info about the target type and member.
+	const dotted = /^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)$/.exec(label);
+	if (dotted) {
+		const targetType = dotted[1];
+		const targetMember = dotted[2];
+		const parts: string[] = [];
+		if (defs.has(targetType)) {
+			parts.push(`${targetType} — ${defs.get(targetType)!.kind}`);
+			const map = fieldsByStruct.get(targetType);
+			if (map && map.has(targetMember)) {
+				parts.push(`member '${targetMember}' exists with type: ${map.get(targetMember)}`);
+			} else {
+				parts.push(`member '${targetMember}' not found on type ${targetType}`);
+			}
+		} else {
+			parts.push(`target type '${targetType}' not found`);
+		}
+		return { contents: { kind: MarkupKind.PlainText, value: `${targetType}.${targetMember} — ${parts.join(' — ')}` } } as Hover;
+	}
+
+	// reference(Type.member) hover: if hovering over the whole reference(...) expression
+	// provide info about whether the target type and member exist and the member's declared type
+	const refFullRx = /^reference\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)$/i;
+	const refMatchFull = refFullRx.exec(label);
+	if (refMatchFull) {
+		const targetType = refMatchFull[1];
+		const targetMember = refMatchFull[2];
+		const pieces: string[] = [];
+		if (defs.has(targetType)) {
+			pieces.push(`${targetType} — ${defs.get(targetType)!.kind}`);
+			const map = fieldsByStruct.get(targetType);
+			if (map && map.has(targetMember)) {
+				const memberType = map.get(targetMember)!;
+				pieces.push(`member '${targetMember}' exists with type: ${memberType}`);
+			} else {
+				pieces.push(`member '${targetMember}' not found on type ${targetType}`);
+			}
+		} else {
+			pieces.push(`target type '${targetType}' not found`);
+		}
+		return { contents: { kind: MarkupKind.PlainText, value: `reference(${targetType}.${targetMember}) — ${pieces.join(' — ')}` } } as Hover;
+	}
+
+	if (defs.has(label)) {
+		const d = defs.get(label)!;
+		try { connection.console.log(`onHover: found definition for '${label}' kind=${d.kind} source=${d.doc}`); } catch (e) {}
+		return { contents: { kind: MarkupKind.PlainText, value: `${label} — ${d.kind}` } } as Hover;
+	}
+
+	// fallback: known generators (match either label or label with args stripped)
+	if (knownGenerators.some(k => k.toLowerCase() === label.toLowerCase()) || knownGenerators.some(k => k.toLowerCase() === labelNoArgs.toLowerCase())) {
+		const genLabel = knownGenerators.find(k => k.toLowerCase() === label.toLowerCase()) || knownGenerators.find(k => k.toLowerCase() === labelNoArgs.toLowerCase()) || label;
+		try { connection.console.log(`onHover: '${genLabel}' is known generator`); } catch (e) {}
+		return { contents: { kind: MarkupKind.PlainText, value: `${genLabel} — known generator` } } as Hover;
+	}
+
+	try { connection.console.log(`onHover: no info for '${label}'`); } catch (e) {}
+	return { contents: [] } as Hover;
+});
+
 // --- Semantic tokens provider (full) --------------------------------------------------------
 // Simple semantic tokens implementation: scans lines and emits tokens for
 // types, variables, modifiers (including generator modifiers), strings and comments.
-const tokenTypeToIndex: { [s: string]: number } = {};
-['type', 'variable', 'builtin', 'modifier', 'gen_modifier', 'generator', 'comment', 'string'].forEach((t, i) => tokenTypeToIndex[t] = i);
-
-const rxComment = /\/\/.*|\/\*[\s\S]*?\*\//g;
-const rxString = /"(?:\\.|[^"\\])*"/g;
-const rxStructEnum = /^\s*(struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)/;
-// field: type: name: ...  -- tighten to require type start with letter/underscore
-const rxField = /^\s*([A-Za-z_][A-Za-z0-9_<>,\s]*)\s*:\s*([A-Za-z_][A-Za-z0-9_]*)/;
-// generic array matcher, allow optional spaces inside angle brackets
-const rxTypeGeneric = /\barray\s*<\s*([A-Za-z_][A-Za-z0-9_]*)\s*>/gi;
-// modifiers and parameterized modifiers (exclude 'reference' and gens_ handled by dedicated regexes)
-// make modifier matching case-insensitive to be more robust
-const rxModifier = /\b(required|optional|unique|auto_increment|primary_key|min_items|max_items|min|max|description)\b/gi;
-const rxReference = /reference\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/g;
-// gens_ may contain generator names with letters, numbers, and underscores; case-insensitive
-const rxGens = /gens_(enabled|disabled)\s*\(\s*([A-Za-z0-9_\-,\s]+)\s*\)/gi;
-// simple gens_ token (no parentheses) e.g. a standalone 'gens_disabled'
-const rxGensSimple = /\bgens_(enabled|disabled)\b/gi;
-// known generators to highlight specially when appearing as arguments inside gens_enabled/disabled
-const knownGenerators = ['Cpp','Java','MySQL','SQLite','JSON','Lua'];
-
-// builtin/primitive types to highlight as 'type'
-const builtinTypes = ['bool','string','int8','int16','int32','int64','uint8','uint16','uint32','uint64','float','double','array','void','pointer'];
-// match builtin type names as whole words (case-insensitive)
-const rxBuiltin = new RegExp('\\b(' + builtinTypes.join('|') + ')\\b','gi');
 
 function provideSemanticTokensFull(textDocument: TextDocument): SemanticTokens {
 	const text = textDocument.getText();
@@ -413,6 +800,26 @@ function provideSemanticTokensFull(textDocument: TextDocument): SemanticTokens {
 
 	for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
 		const line = lines[lineIndex];
+
+		// include directive: mark 'include' as modifier and filename as string
+		let im;
+		rxInclude.lastIndex = 0;
+		if ((im = rxInclude.exec(line)) !== null) {
+			const kw = 'include';
+			const kwPos = line.toLowerCase().indexOf(kw, im.index);
+			if (kwPos >= 0 && !isOverlapping(lineIndex, kwPos, kw.length)) {
+				collected.push({ line: lineIndex, start: kwPos, len: kw.length, t: tokenTypeToIndex['modifier'], mod: 0 });
+				markOccupied(lineIndex, kwPos, kw.length);
+			}
+			// filename is in capture group 1
+			const fname = im[1];
+			const fPos = line.indexOf(fname, im.index);
+			if (fPos >= 0 && !isOverlapping(lineIndex, fPos, fname.length)) {
+				collected.push({ line: lineIndex, start: fPos, len: fname.length, t: tokenTypeToIndex['string'], mod: 0 });
+				markOccupied(lineIndex, fPos, fname.length);
+			}
+			// continue tokenization for the line but we've reserved include areas
+		}
 
 		// comments: reserve token ranges first so other tokens won't overlap
 		let m: RegExpExecArray | null;

@@ -16,7 +16,9 @@ export let platformEol: string;
  */
 export async function activate(docUri: vscode.Uri) {
 	// The extensionId is `publisher.name` from package.json
-	const ext = vscode.extensions.getExtension('vscode-samples.lsp-sample')!;
+	// Use the actual extension id (publisher.name) from the workspace root package.json
+	// Root package.json has "publisher": "schemalang" and "name": "schemalang"
+	const ext = vscode.extensions.getExtension('schemalang.schemalang')!;
 	await ext.activate();
 	try {
 		doc = await vscode.workspace.openTextDocument(docUri);
