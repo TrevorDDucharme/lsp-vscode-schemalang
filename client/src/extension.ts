@@ -4,6 +4,7 @@
  * ------------------------------------------------------------------------------------------ */
 
 import * as path from 'path';
+import * as vscode from 'vscode';
 import { workspace, ExtensionContext } from 'vscode';
 
 import {
@@ -13,7 +14,43 @@ import {
 	TransportKind
 } from 'vscode-languageclient/node';
 
+import { SchemaLangDebugSession } from './debugAdapter';
+
 let client: LanguageClient;
+
+class SchemaLangDebugConfigurationProvider implements vscode.DebugConfigurationProvider {
+	/**
+	 * Massage a debug configuration just before a debug session is being launched,
+	 * e.g. add all missing attributes to the debug configuration.
+	 */
+	resolveDebugConfiguration(folder: vscode.WorkspaceFolder | undefined, config: vscode.DebugConfiguration, token?: vscode.CancellationToken): vscode.ProviderResult<vscode.DebugConfiguration> {
+		// if launch.json is missing or empty
+		if (!config.type && !config.request && !config.name) {
+			const editor = vscode.window.activeTextEditor;
+			if (editor && editor.document.languageId === 'schemalang') {
+				config.type = 'schemalang';
+				config.name = 'Launch';
+				config.request = 'launch';
+				config.program = '${file}';
+				config.stopOnEntry = true;
+			}
+		}
+
+		// Default program to the currently open file
+		if (!config.program) {
+			config.program = '${file}';
+		}
+
+		return config;
+	}
+}
+
+class SchemaLangDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescriptorFactory {
+	createDebugAdapterDescriptor(session: vscode.DebugSession): vscode.ProviderResult<vscode.DebugAdapterDescriptor> {
+		// Use inline debug adapter implementation
+		return new vscode.DebugAdapterInlineImplementation(new SchemaLangDebugSession());
+	}
+}
 
 export function activate(context: ExtensionContext) {
 	// The server is implemented in node
@@ -51,6 +88,16 @@ export function activate(context: ExtensionContext) {
 
 	// Start the client. This will also launch the server
 	client.start();
+
+	// Register debug configuration provider
+	context.subscriptions.push(
+		vscode.debug.registerDebugConfigurationProvider('schemalang', new SchemaLangDebugConfigurationProvider())
+	);
+
+	// Register debug adapter descriptor factory (inline implementation)
+	context.subscriptions.push(
+		vscode.debug.registerDebugAdapterDescriptorFactory('schemalang', new SchemaLangDebugAdapterDescriptorFactory())
+	);
 }
 
 export function deactivate(): Thenable<void> | undefined {

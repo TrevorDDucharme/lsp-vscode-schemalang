@@ -1,4 +1,16 @@
-.vscode/**
+node_modules/
+**/node_modules/**
+.vscode/
+*.vsix
+*.tsbuildinfo
+*.log
+client/package-lock.json
+server/package-lock.json
+test/
+testFixture/
+.github/
+dist/
+coverage/.vscode/**
 **/*.ts
 **/*.map
 .gitignore

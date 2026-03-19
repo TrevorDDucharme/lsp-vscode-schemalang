@@ -162,6 +162,7 @@ const tokenTypeToIndex: { [s: string]: number } = {};
 const rxComment = /\/\/.*|\/\*[\s\S]*?\*\//g;
 const rxString = /"(?:\\.|[^"\\])*"/g;
 const rxStructEnum = /^\s*(struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)/;
+const rxDeclare = /^\s*declare\s+(struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)\s*;?/;
 // include directive: include "./other.schema" or include './other.schema'
 const rxInclude = /^\s*include\s+["'](.+?)["']/i;
 // field: type: name: ...  -- tighten to require type start with letter/underscore
@@ -170,7 +171,7 @@ const rxField = /^\s*([A-Za-z_][A-Za-z0-9_<>,\s]*)\s*:\s*([A-Za-z_][A-Za-z0-9_]*
 const rxTypeGeneric = /\barray\s*<\s*([A-Za-z_][A-Za-z0-9_]*)\s*>/gi;
 // modifiers and parameterized modifiers (exclude 'reference' and gens_ handled by dedicated regexes)
 // make modifier matching case-insensitive to be more robust
-const rxModifier = /\b(required|optional|unique|auto_increment|primary_key|min_items|max_items|min|max|description)\b/gi;
+const rxModifier = /\b(required|optional|unique|auto_increment|primary_key|min_items|max_items|min|max|description|version|SchemaLangVersion)\b/gi;
 const rxReference = /reference\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/g;
 // gens_ may contain generator names with letters, numbers, and underscores; case-insensitive
 const rxGens = /gens_(enabled|disabled)\s*\(\s*([A-Za-z0-9_\-,\s]+)\s*\)/gi;
@@ -180,7 +181,7 @@ const rxGensSimple = /\bgens_(enabled|disabled)\b/gi;
 const knownGenerators = ['Cpp','Java','MySQL','SQLite','JSON','Lua'];
 
 // builtin/primitive types to highlight as 'type'
-const builtinTypes = ['bool','string','int8','int16','int32','int64','uint8','uint16','uint32','uint64','float','double','array','void','pointer'];
+const builtinTypes = ['bool','string','int8','int16','int32','int64','uint8','uint16','uint32','uint64','float','double','array','void','pointer','blob','char','uchar'];
 // match builtin type names as whole words (case-insensitive)
 const rxBuiltin = new RegExp('\\b(' + builtinTypes.join('|') + ')\\b','gi');
 
@@ -265,11 +266,16 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 	// local regexes to avoid relying on later declarations
 	const localStructHeader = /^\s*struct\s+([A-Za-z_][A-Za-z0-9_]*)(\s*:\s*[^\{]+)?\s*\{?/;
 	const localEnumHeader = /^\s*enum\s+([A-Za-z_][A-Za-z0-9_]*)(\s*:\s*[^\{]+)?\s*\{?/;
+	const localDeclareHeader = /^\s*declare\s+(struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)\s*;?/;
 	const localRxInclude = /^\s*include\s+["'](.+?)["']/i;
 
 	for (let li = 0; li < procLines.length; li++) {
 		const ln = procLines[li];
 		let mh;
+		if ((mh = localDeclareHeader.exec(ln))) {
+			definedTypes.add(mh[2]);
+			continue;
+		}
 		if ((mh = localStructHeader.exec(ln))) {
 			definedTypes.add(mh[1]);
 			continue;
@@ -296,6 +302,8 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 						let sm;
 						if ((sm = localStructHeader.exec(ilin))) definedTypes.add(sm[1]);
 						if ((sm = localEnumHeader.exec(ilin))) definedTypes.add(sm[1]);
+						const dm = localDeclareHeader.exec(ilin);
+						if (dm) definedTypes.add(dm[2]);
 					}
 				}
 			} catch (e) {
@@ -338,6 +346,12 @@ async function validateTextDocument(textDocument: TextDocument): Promise<Diagnos
 		if (line.match(/^\s*$/)) continue;
 		// skip lines that are just an opening brace (possibly followed by comments)
 		if (/^\s*\{/.test(line)) continue;
+		rxDeclare.lastIndex = 0;
+		const declareMatch = rxDeclare.exec(line);
+		if (declareMatch) {
+			definedTypes.add(declareMatch[2]);
+			continue;
+		}
 		let m;
 		if ((m = structHeader.exec(line))) {
 			stack.push({ type: 'struct', name: m[1], line: i });
@@ -495,12 +509,25 @@ connection.onCompletion(
 		return [
 			{ label: 'struct', kind: CompletionItemKind.Keyword, data: 1 },
 			{ label: 'enum', kind: CompletionItemKind.Keyword, data: 2 },
+			{ label: 'declare', kind: CompletionItemKind.Keyword, data: 9 },
 			{ label: 'string', kind: CompletionItemKind.TypeParameter, data: 3 },
 			{ label: 'int8', kind: CompletionItemKind.TypeParameter, data: 4 },
 			{ label: 'int64', kind: CompletionItemKind.TypeParameter, data: 5 },
 			{ label: 'float', kind: CompletionItemKind.TypeParameter, data: 6 },
 			{ label: 'bool', kind: CompletionItemKind.TypeParameter, data: 7 },
-			{ label: 'array<...>', kind: CompletionItemKind.TypeParameter, data: 8 }
+			{ label: 'array<...>', kind: CompletionItemKind.TypeParameter, data: 8 },
+			{ label: 'blob', kind: CompletionItemKind.TypeParameter, data: 10 },
+			{ label: 'char', kind: CompletionItemKind.TypeParameter, data: 11 },
+			{ label: 'uchar', kind: CompletionItemKind.TypeParameter, data: 12 },
+			{ label: 'double', kind: CompletionItemKind.TypeParameter, data: 13 },
+			{ label: 'int16', kind: CompletionItemKind.TypeParameter, data: 14 },
+			{ label: 'int32', kind: CompletionItemKind.TypeParameter, data: 15 },
+			{ label: 'uint8', kind: CompletionItemKind.TypeParameter, data: 16 },
+			{ label: 'uint16', kind: CompletionItemKind.TypeParameter, data: 17 },
+			{ label: 'uint32', kind: CompletionItemKind.TypeParameter, data: 18 },
+			{ label: 'uint64', kind: CompletionItemKind.TypeParameter, data: 50 },
+			{ label: 'void', kind: CompletionItemKind.TypeParameter, data: 51 },
+			{ label: 'pointer', kind: CompletionItemKind.TypeParameter, data: 52 }
 			,
 			// common modifiers seen in README and rpg.schema
 			{ label: 'required', kind: CompletionItemKind.Keyword, data: 20 },
@@ -512,7 +539,11 @@ connection.onCompletion(
 			{ label: 'description("', kind: CompletionItemKind.Snippet, data: 25 },
 			{ label: 'reference(', kind: CompletionItemKind.Function, data: 26 },
 			{ label: 'gens_enabled(', kind: CompletionItemKind.Function, data: 27 },
-			{ label: 'gens_disabled(', kind: CompletionItemKind.Function, data: 28 }
+			{ label: 'gens_disabled(', kind: CompletionItemKind.Function, data: 28 },
+			{ label: 'auto_increment', kind: CompletionItemKind.Keyword, data: 29 },
+			{ label: 'primary_key', kind: CompletionItemKind.Keyword, data: 30 },
+			{ label: 'version(', kind: CompletionItemKind.Function, data: 31 },
+			{ label: 'SchemaLangVersion', kind: CompletionItemKind.Keyword, data: 32 }
 			,
 			// known generator names (helpful inside gens_enabled/disabled parentheses)
 			{ label: 'Cpp', kind: CompletionItemKind.Value, data: 40 },
@@ -553,6 +584,7 @@ function collectDefinitionsForUri(docUri: string, text: string) {
 
 	const hStruct = /^\s*struct\s+([A-Za-z_][A-Za-z0-9_]*)/;
 	const hEnum = /^\s*enum\s+([A-Za-z_][A-Za-z0-9_]*)/;
+	const hDeclare = /^\s*declare\s+(struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)/;
 	const incRx = /^\s*include\s+["'](.+?)["']/i;
 
 	function addFromText(baseDir: string | undefined, txt: string, sourceKey: string) {
@@ -563,6 +595,12 @@ function collectDefinitionsForUri(docUri: string, text: string) {
 		for (let i = 0; i < ls.length; i++) {
 			const l = ls[i];
 			let m;
+			const decl = hDeclare.exec(l);
+			if (decl) {
+				const kind = decl[1].toLowerCase() === 'enum' ? 'enum' : 'struct';
+				defs.set(decl[2], { kind: kind as 'struct' | 'enum', line: i, doc: sourceKey });
+				continue;
+			}
 			if ((m = hStruct.exec(l))) {
 				const sname = m[1];
 				defs.set(sname, { kind: 'struct', line: i, doc: sourceKey });
@@ -679,7 +717,10 @@ connection.onHover((params) => {
 		max_items: 'Specifies the maximum number of items in an array: max_items(n).',
 		min: 'Minimum value constraint.',
 		max: 'Maximum value constraint.',
-		description: 'Adds a documentation string: description("text").'
+		description: 'Adds a documentation string: description("text").',
+		declare: 'Forward declare a struct or enum so it can be referenced before its definition.',
+		version: 'Sets a semantic version on a struct: version(major.minor.patch). Used for schema migrations.',
+		schemalangversion: 'Declares the SchemaLang transpiler version this file targets: SchemaLangVersion major.minor.patch;'
 	};
 	// add include hover separately
 	const includeHover = 'Includes another schema file. Usage: include "path/to/file.schema"';
@@ -800,6 +841,29 @@ function provideSemanticTokensFull(textDocument: TextDocument): SemanticTokens {
 
 	for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
 		const line = lines[lineIndex];
+
+		rxDeclare.lastIndex = 0;
+		const decl = rxDeclare.exec(line);
+		if (decl) {
+			const declareWord = 'declare';
+			const declarePos = line.toLowerCase().indexOf(declareWord, decl.index);
+			if (declarePos >= 0 && !isOverlapping(lineIndex, declarePos, declareWord.length)) {
+				collected.push({ line: lineIndex, start: declarePos, len: declareWord.length, t: tokenTypeToIndex['modifier'], mod: 0 });
+				markOccupied(lineIndex, declarePos, declareWord.length);
+			}
+			const keyword = decl[1];
+			const kwPos = line.indexOf(keyword, (declarePos >= 0 ? declarePos + declareWord.length : decl.index));
+			if (kwPos >= 0 && !isOverlapping(lineIndex, kwPos, keyword.length)) {
+				collected.push({ line: lineIndex, start: kwPos, len: keyword.length, t: tokenTypeToIndex['modifier'], mod: 0 });
+				markOccupied(lineIndex, kwPos, keyword.length);
+			}
+			const name = decl[2];
+			const namePos = line.indexOf(name, (kwPos >= 0 ? kwPos + keyword.length : decl.index));
+			if (namePos >= 0 && !isOverlapping(lineIndex, namePos, name.length)) {
+				collected.push({ line: lineIndex, start: namePos, len: name.length, t: tokenTypeToIndex['type'], mod: 0 });
+				markOccupied(lineIndex, namePos, name.length);
+			}
+		}
 
 		// include directive: mark 'include' as modifier and filename as string
 		let im;

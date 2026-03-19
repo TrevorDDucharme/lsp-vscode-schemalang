@@ -26,7 +26,9 @@
 	"activationEvents": [
 		"onLanguage:schemalang",
 		"onFileSystem:schemalang",
-		"onLanguage:plaintext"
+		"onLanguage:plaintext",
+		"onDebugResolve:schemalang",
+		"onDebugDynamicConfigurations:schemalang"
 	],
 	"main": "./client/out/extension",
 	"contributes": {
@@ -61,6 +63,66 @@
 					"comment": ["comment"],
 					"string": ["string"]
 				}
+			}
+		],
+
+		"breakpoints": [
+			{
+				"language": "schemalang"
+			}
+		],
+
+		"debuggers": [
+			{
+				"type": "schemalang",
+				"label": "SchemaLang Debug",
+				"languages": ["schemalang"],
+				"configurationAttributes": {
+					"launch": {
+						"required": [
+							"program"
+						],
+						"properties": {
+							"program": {
+								"type": "string",
+								"description": "Absolute path to a schema file.",
+								"default": "${file}"
+							},
+							"stopOnEntry": {
+								"type": "boolean",
+								"description": "Automatically stop after launch.",
+								"default": true
+							},
+							"trace": {
+								"type": "boolean",
+								"description": "Enable logging of the Debug Adapter Protocol.",
+								"default": false
+							}
+						}
+					}
+				},
+				"initialConfigurations": [
+					{
+						"type": "schemalang",
+						"request": "launch",
+						"name": "Debug SchemaLang File",
+						"program": "${file}",
+						"stopOnEntry": true
+					}
+				],
+				"configurationSnippets": [
+					{
+						"label": "SchemaLang Debug: Launch",
+						"description": "A new configuration for debugging a schema file.",
+						"body": {
+							"type": "schemalang",
+							"request": "launch",
+							"name": "Debug SchemaLang File",
+							"program": "^\"\\${file}\"",
+							"stopOnEntry": true
+						}
+					}
+				]
 			}
 		],
 

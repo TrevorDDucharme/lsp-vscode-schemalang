@@ -123,8 +123,8 @@ Dynamic generators are compiled as shared libraries that implement the `Generato
 class MyCustomGenerator : public Generator
 {
 public:
-    std::string convert_to_local_type(ProgramStructure *ps, TypeDefinition type) override;
-    bool add_generator_specific_content_to_struct(Generator *gen, ProgramStructure *ps, StructDefinition &s) override;
+    std::string convert_to_local_type(std::shared_ptr<ProgramStructure>ps, TypeDefinition type) override;
+    bool add_generator_specific_content_to_struct(std::shared_ptr<Generator>gen, std::shared_ptr<ProgramStructure>ps, StructDefinition &s) override;
     bool generate_files(ProgramStructure ps, std::string out_path) override;
 };
 
@@ -137,7 +137,7 @@ static bool g_enableSpecialFeature = false;
 static std::string g_outputFormat = "default";
 
 // Implement Generator methods
-std::string MyCustomGenerator::convert_to_local_type(ProgramStructure *ps, TypeDefinition type)
+std::string MyCustomGenerator::convert_to_local_type(std::shared_ptr<ProgramStructure>ps, TypeDefinition type)
 {
     // Convert SchemaLang types to your target language types
     if (type.name == "string") return "MyString";
@@ -146,7 +146,7 @@ std::string MyCustomGenerator::convert_to_local_type(ProgramStructure *ps, TypeD
     return "Unknown";
 }
 
-bool MyCustomGenerator::add_generator_specific_content_to_struct(Generator *gen, ProgramStructure *ps, StructDefinition &s)
+bool MyCustomGenerator::add_generator_specific_content_to_struct(std::shared_ptr<Generator>gen, std::shared_ptr<ProgramStructure>ps, StructDefinition &s)
 {
     // Add custom methods or content to generated structs
     // This is called during the drop-in system integration
@@ -245,7 +245,7 @@ The transpiler automatically:
 Dynamic generators can interact with built-in generators and other dynamic generators:
 
 ```cpp
-bool MyCustomGenerator::add_generator_specific_content_to_struct(Generator *gen, ProgramStructure *ps, StructDefinition &s)
+bool MyCustomGenerator::add_generator_specific_content_to_struct(std::shared_ptr<Generator>gen, std::shared_ptr<ProgramStructure>ps, StructDefinition &s)
 {
     // Check if this is being called by the C++ generator
     if (/* gen is CppGenerator */) {

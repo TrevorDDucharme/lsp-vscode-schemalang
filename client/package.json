@@ -14,29 +14,57 @@
 	},
 	"contributes": {
 		"semanticTokenTypes": [
-			{ "id": "type" },
-			{ "id": "variable" },
-			{ "id": "modifier" },
-			{ "id": "gen_modifier" },
-			{ "id": "comment" },
-			{ "id": "string" }
+			{
+				"id": "type"
+			},
+			{
+				"id": "variable"
+			},
+			{
+				"id": "modifier"
+			},
+			{
+				"id": "gen_modifier"
+			},
+			{
+				"id": "comment"
+			},
+			{
+				"id": "string"
+			}
 		],
 		"languages": [
 			{
 				"id": "schemalang",
-				"aliases": ["SchemaLang", "schemalang"],
-				"extensions": [".schema"]
+				"aliases": [
+					"SchemaLang",
+					"schemalang"
+				],
+				"extensions": [
+					".schema"
+				]
 			}
-		]
-		,
+		],
 		"semanticTokenScopes": {
 			"schemalang": {
-				"type": ["entity.name.type"],
-				"variable": ["variable.other"],
-				"modifier": ["keyword.other"],
-				"gen_modifier": ["entity.other.attribute-name"],
-				"comment": ["comment"],
-				"string": ["string"]
+				"type": [
+					"entity.name.type"
+				],
+				"variable": [
+					"variable.other"
+				],
+				"modifier": [
+					"keyword.other"
+				],
+				"gen_modifier": [
+					"entity.other.attribute-name"
+				],
+				"comment": [
+					"comment"
+				],
+				"string": [
+					"string"
+				]
 			}
 		}
 	},
@@ -46,6 +74,8 @@
 	},
 	"devDependencies": {
 		"@types/vscode": "^1.100.0",
+		"@vscode/debugadapter": "^1.68.0",
+		"@vscode/debugprotocol": "^1.68.0",
 		"@vscode/test-electron": "^2.3.9"
 	}
 }
